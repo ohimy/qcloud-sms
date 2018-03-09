@@ -1,16 +1,17 @@
 require "qcloud/sms/version"
+require 'securerandom'
 require 'digest'
-require 'typhoeus/adapters/faraday'
+require 'typhoeus'
+require 'json'
 
 module Qcloud
   module Sms
     class Configuration
-      attr_accessor :app_id, :app_key, :sign, :tpl_id
+      attr_accessor :app_id, :app_key, :sign
       def initialize
         @app_id = ''
         @app_key = ''
         @sign = ''
-        @tpl_id = ''
       end
     end
 
@@ -25,44 +26,44 @@ module Qcloud
         yield(configuration)
       end
 
-      def sms_single_sender(mobile, templId, params)
-        Typhoeus.post("https://yun.tim.qq.com/v5/tlssmssvr/?" + "sdkappid=" + configuration.app_id + "&random=" + random,
-                 headers: {'Content-Type'=> "application/json"},
-                 body: post_body_data(mobile, templId, params))
+      def create_params(mobile, templId, params, random_number)
+        sms_params = {
+          "ext" => "",
+          "extend" => "",
+          "params" => params,
+          "sig" => sig(mobile, random_number),
+          "sign" => configuration.sign,
+          "tel" => {
+            "mobile" => mobile,
+            "nationcode" => "86"
+          },
+          "time" => timestamp,
+          "tpl_id" => templId
+        }
+        sms_params.to_json
+      end
+
+      def single_sender(mobile, templId, params)
+        random_number = random
+        Typhoeus.post("https://yun.tim.qq.com/v5/tlssmssvr/sendsms?sdkappid=" + configuration.app_id + "&random=" + random_number,
+          headers: { "Content-Type": "application/json" },
+          body: create_params(mobile, templId, params, random_number)
+        )
       end
 
       # 生成数字签名
-      def sig(mobile)
-        key = key_secret + '&'
-        signature = 'appkey=' + configuration.app_key + "&random=" + random + "&time=" + seed_timestamp + "&mobile=" + mobile
+      def sig(mobile, random_number)
+        signature = "appkey=" + configuration.app_key + "&random=" + random_number + "&time=" + timestamp.to_s + "&mobile=" + mobile
         Digest::SHA256.hexdigest signature
       end
 
       # 生成随机数
       def random
-        SecureRandom.random_number.to_s.slice(-6..-1)
-      end
-
-      # 组成附带签名的 POST 方法的 BODY 请求字符串
-      def post_body_data(mobile, templId, params)
-        body_data = {
-          params: params,
-          sig: sig(mobile),
-          sign: configuration.sign,
-          tel: {
-            mobile: mobile,
-            nationcode: "86"
-          },
-          time: seed_timestamp,
-          tpl_id: templId
-          extend: "",
-          ext: ""
-        }
-      }
+        SecureRandom.random_number.to_s.slice(-10..-1)
       end
 
       # 生成短信时间戳
-      def seed_timestamp
+      def timestamp
         Time.now.to_i
       end
 
